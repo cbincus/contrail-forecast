@@ -91,7 +91,3 @@ The page requests hourly temperature and relative humidity on 15 pressure levels
 ## Data attribution
 
 [Weather data by Open-Meteo.com](https://open-meteo.com/), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). ICON model data: [Deutscher Wetterdienst (DWD)](https://www.dwd.de/).
-
-## License
-
-<!-- Choose a licence for the code (e.g. MIT) and add a LICENSE file. -->
