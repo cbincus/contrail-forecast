@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DWD ICON – cloud cover &amp; contrail conditions (log p / time)</title>
+<style>
+  :root {
+    --fg: #1f2328;
+    --muted: #656d76;
+    --border: #d0d7de;
+    --bg: #f6f8fa;
+    --accent: #0969da;
+    --c1: rgb(56, 152, 236);      /* contrails form, short-lived */
+    --c2: rgb(110, 40, 190);      /* persistent contrails */
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--fg);
+    background: var(--bg);
+  }
+  header {
+    padding: 14px 20px 10px;
+    background: #fff;
+    border-bottom: 1px solid var(--border);
+  }
+  h1 { font-size: 18px; margin: 0 0 10px; font-weight: 600; }
+  form { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: flex-end; }
+  fieldset {
+    display: flex; flex-wrap: wrap; gap: 12px 14px; align-items: flex-end;
+    border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px 10px; margin: 0;
+  }
+  legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
+  label {
+    display: flex; flex-direction: column; gap: 3px;
+    font-size: 12px; color: var(--muted);
+  }
+  label.inline { flex-direction: row; align-items: center; gap: 6px; font-size: 13px; color: var(--fg); padding-bottom: 6px; }
+  input, select {
+    font: inherit; font-size: 14px; color: var(--fg);
+    padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px;
+    width: 110px; background: #fff;
+  }
+  select { width: auto; }
+  input[type=checkbox] { width: auto; margin: 0; }
+  input:disabled { background: #f3f4f6; color: var(--muted); }
+  button {
+    font: inherit; font-size: 14px; padding: 6px 16px; border-radius: 6px;
+    border: 1px solid var(--accent); background: var(--accent); color: #fff;
+    cursor: pointer;
+  }
+  button:disabled { opacity: .6; cursor: progress; }
+  #status { font-size: 13px; color: var(--muted); margin-top: 8px; min-height: 18px; }
+  #status.error { color: #cf222e; }
+  main { padding: 16px 20px 24px; }
+  .card {
+    background: #fff; border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 12px 10px;
+  }
+  #title { font-size: 14px; margin: 2px 6px 8px; font-weight: 600; }
+  #title small { font-weight: 400; color: var(--muted); }
+  #wrap { position: relative; width: 100%; height: 600px; }
+  #plot { width: 100%; height: 100%; display: block; }
+  #tip {
+    position: absolute; pointer-events: none; display: none;
+    background: rgba(31,35,40,.94); color: #fff; font-size: 12px;
+    padding: 7px 9px; border-radius: 6px; white-space: nowrap; line-height: 1.5;
+    box-shadow: 0 4px 14px rgba(0,0,0,.18);
+  }
+  #tip .row { opacity: .85; }
+  #tip .verdict { margin-top: 3px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  #tip .chip { width: 11px; height: 11px; border-radius: 2px; border: 1px solid rgba(255,255,255,.6); display: inline-block; }
+  #legend {
+    display: flex; align-items: center; gap: 8px 22px; font-size: 12px;
+    color: var(--fg); margin: 10px 6px 2px; flex-wrap: wrap;
+  }
+  #legend .item { display: flex; align-items: center; gap: 7px; }
+  #bar {
+    width: 160px; height: 12px; border: 1px solid #999;
+    background: linear-gradient(to right, rgb(255,255,255), rgb(128,128,128));
+  }
+  .sw { display: inline-block; width: 22px; height: 12px; border-radius: 2px; }
+  .sw.c1 { background: rgba(56,152,236,.45); border: 1.5px solid rgb(30,110,200); }
+  .sw.c2 { background: rgba(110,40,190,.6); border: 1.5px solid rgb(75,20,140); }
+  .sw.ground { background: rgb(214, 198, 172); border: 1px solid rgb(160, 140, 110); }
+  .sw.nodata {
+    border: 1px solid #999;
+    background: repeating-linear-gradient(45deg, #fff 0 3px, #f2c4c4 3px 5px);
+  }
+  #notes { font-size: 11.5px; color: var(--muted); margin: 8px 6px 0; line-height: 1.5; }
+  #notes p { margin: 0 0 6px; }
+  #notes b { color: var(--fg); font-weight: 600; }
+  #attribution {
+    font-size: 12px; color: var(--muted); margin: 10px 6px 0; padding-top: 8px;
+    border-top: 1px solid var(--border); line-height: 1.6;
+  }
+  #attribution a { color: var(--accent); text-decoration: none; }
+  #attribution a:hover { text-decoration: underline; }
+  .contrail-only { transition: opacity .15s; }
+  .off .contrail-only { opacity: .35; }
+</style>
+</head>
+<body>
+<header>
+  <h1>DWD ICON · cloud cover &amp; contrail conditions (log p – time)</h1>
+  <form id="form">
+    <fieldset>
+      <legend>Location &amp; forecast</legend>
+      <label>Latitude (°)
+        <input id="lat" type="number" step="any" min="-90" max="90" value="47.0" required>
+      </label>
+      <label>Longitude (°)
+        <input id="lon" type="number" step="any" min="-180" max="180" value="28.9" required>
+      </label>
+      <label>Past days
+        <input id="past" type="number" step="1" min="0" max="92" value="2" required>
+      </label>
+      <label>Forecast days
+        <input id="days" type="number" step="1" min="1" max="7" value="5" required>
+      </label>
+      <button id="go" type="submit">Load forecast</button>
+    </fieldset>
+    <fieldset>
+      <legend>Contrails</legend>
+      <label class="inline"><input id="showContrails" type="checkbox" checked> Show</label>
+      <label>Engine contrail factor (g kg⁻¹ K⁻¹)
+        <select id="cfPreset"></select>
+      </label>
+      <label>CF value
+        <input id="cf" type="number" step="0.0001" min="0.0300" max="0.0390" value="0.0390">
+      </label>
+      <label>Persistent if RHi ≥ (%)
+        <input id="persistThr" type="number" step="1" min="50" max="150" value="90" style="width:90px">
+      </label>
+    </fieldset>
+    <label>Shading
+      <select id="mode">
+        <option value="blocks" selected>Blocks (raw levels)</option>
+        <option value="smooth">Smooth (interpolated)</option>
+      </select>
+    </label>
+  </form>
+  <div id="status"></div>
+</header>
+
+<main>
+  <div class="card" id="card">
+    <div id="title"></div>
+    <div id="wrap">
+      <canvas id="plot"></canvas>
+      <div id="tip"></div>
+    </div>
+    <div id="legend">
+      <span class="item"><span>0 %</span><span id="bar"></span><span>100 % cloud cover (parameterised)</span></span>
+      <span class="item contrail-only"><span class="sw c1"></span><span>Contrails form, short-lived (T &lt; T<sub>c</sub>)</span></span>
+      <span class="item contrail-only"><span class="sw c2"></span><span>Persistent contrails (T &lt; T<sub>c</sub> and <span id="persistLabel">RHi ≥ 90 %</span>)</span></span>
+      <span class="item"><span class="sw ground"></span><span>below ground</span></span>
+      <span class="item"><span class="sw nodata"></span><span>no data</span></span>
+    </div>
+    <div id="notes">
+      <p><b>Humidity.</b> ICON reports relative humidity over water (RH<sub>w</sub>). Vapour pressure e = RH<sub>w</sub> · e<sub>sat(w)</sub>(T),
+      and RH over ice RH<sub>i</sub> = e / e<sub>sat(i)</sub>(T). Saturation vapour pressures use the Tetens formula
+      e<sub>sat</sub>(T) = a<sub>1</sub> exp[a<sub>3</sub>(T − T<sub>0</sub>)/(T − a<sub>4</sub>)], T<sub>0</sub> = 273.16 K, with
+      a<sub>1</sub> = 611.21 Pa, a<sub>3</sub> = 17.502, a<sub>4</sub> = 32.19 K over water (Buck 1981) and
+      a<sub>1</sub> = 611.21 Pa, a<sub>3</sub> = 22.587, a<sub>4</sub> = −0.7 K over ice (Alduchov &amp; Eskridge 1996).</p>
+      <p><b>Cloud cover.</b> The cross-section shows cloud cover parameterised after Sundqvist et al. (1989):
+      CC = 1 − √((1 − RH<sub>phase</sub>)/(1 − RH<sub>crit</sub>)), with RH<sub>crit</sub> = 80 %
+      (CC = 0 for RH<sub>phase</sub> ≤ 80 %, CC = 100 % for RH<sub>phase</sub> ≥ 100 %).
+      RH<sub>phase</sub> = e / e<sub>sat</sub>, where e<sub>sat</sub> follows the cloud phase: e<sub>sat(i)</sub> for T ≤ 250.16 K,
+      e<sub>sat(w)</sub> for T ≥ 273.16 K, and α e<sub>sat(w)</sub> + (1 − α) e<sub>sat(i)</sub> in between, with α = ((T − 250.16 K)/23 K)².
+      The mid and low cloud bars show the model's own mid and low cloud cover.</p>
+      <p><b>Contrails.</b> T<sub>c</sub> = critical temperature for contrail formation from Schrader (1997), Tables A1–A4, looked up with RH<sub>w</sub>.
+      The tables are interpolated linearly in ln p, in √(1 − RH<sub>w</sub>) and in ln CF; below 500 hPa T<sub>c</sub> is extrapolated in ln p.
+      Contrails form where T &lt; T<sub>c</sub> and are persistent where, in addition, RH<sub>i</sub> reaches the chosen threshold.
+      The contrail strip summarises each hour over 150–500 hPa (the table range).</p>
+      <p><b>Display.</b> Levels below the model surface (pressure higher than the surface pressure) are masked.
+      Right axis: approximate flight level in the ICAO standard atmosphere.</p>
+      <p><b>References.</b><br>
+      Alduchov, O. A., and R. E. Eskridge, 1996: Improved Magnus form approximation of saturation vapor pressure. <i>J. Appl. Meteor.</i>, <b>35</b>, 601–609.<br>
+      Buck, A. L., 1981: New equations for computing vapor pressure and enhancement factor. <i>J. Appl. Meteor.</i>, <b>20</b>, 1527–1532.<br>
+      Schrader, M. L., 1997: Calculations of aircraft contrail formation critical temperatures. <i>J. Appl. Meteor.</i>, <b>36</b>, 1725–1729.<br>
+      Sundqvist, H., E. Berge, and J. E. Kristjánsson, 1989: Condensation and cloud parameterization studies with a mesoscale numerical weather prediction model. <i>Mon. Wea. Rev.</i>, <b>117</b>, 1641–1657.</p>
+    </div>
+    <div id="attribution">
+      <a href="https://open-meteo.com/" target="_blank" rel="noopener">Weather data by Open-Meteo.com</a>,
+      licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>.
+      Model: ICON global, <a href="https://www.dwd.de/" target="_blank" rel="noopener">Deutscher Wetterdienst (DWD)</a>.<br>
+      Zippenfenig, P. (2023). <i>Open-Meteo.com Weather API</i> [Computer software]. Zenodo.
+      <a href="https://doi.org/10.5281/ZENODO.7970649" target="_blank" rel="noopener">https://doi.org/10.5281/ZENODO.7970649</a>
+    </div>
+  </div>
+</main>
+
+<script>
+(() => {
+  // ======================================================================
+  // Configuration
+  // ======================================================================
+  const API = "https://api.open-meteo.com/v1/forecast";
+  const MODEL = "dwd_icon_global";
+  // Pressure levels shown (hPa), bottom to top. Range 1000 → 150 hPa.
+  const LEVELS = [1000, 975, 950, 925, 900, 850, 800, 700, 600, 500, 400, 300, 250, 200, 150];
+  const P_BOT = 1000, P_TOP = 150;
+  const GREY_FULL = 128;              // grey value used for 100 % cloud cover
+  const GROUND = [214, 198, 172];     // fill colour for levels below the model surface
+  const M = { l: 70, r: 72, t: 72, b: 60 };   // plot margins (CSS px)
+  const STRIP_P_MAX = 500;            // contrail summary strip uses levels with p ≤ this
+  const STRIP = { y: 8, h: 18 };      // contrail summary strip position (CSS px, top of canvas)
+  // cloud-cover summary bars below the contrail strip (Open-Meteo cloud_cover_mid / cloud_cover_low)
+  const CLOUD_BARS = [
+    { key: "midCloud", api: "cloud_cover_mid", label: "Mid cloud", y: 31, h: 14 },
+    { key: "lowCloud", api: "cloud_cover_low", label: "Low cloud", y: 48, h: 14 },
+  ];
+
+  // Overlay colours: [r, g, b, alpha] for fill, and outline colour
+  const CAT = {
+    1: { fill: [56, 152, 236, 0.42], line: [30, 110, 200], css: "rgb(56,152,236)",
+         text: "Contrails form, short-lived" },
+    2: { fill: [110, 40, 190, 0.58], line: [75, 20, 140], css: "rgb(110,40,190)",
+         text: "Persistent contrails" },
+    0: { css: "#ffffff", text: "No contrails" },
+  };
+
+  // ----------------------------------------------------------------------
+  // Critical temperature tables, Schrader (1997), Appendix Tables A1–A4.
+  // Rows: pressure (hPa); columns: RH over water 0,10,…,100 %; values °C.
+  // ----------------------------------------------------------------------
+  const TC_P = [30, 50, 100, 150, 200, 250, 300, 400, 500];
+  const TC_TABLES = [
+    { cf: 0.0300, table: "A2", label: "non-bypass", t: [
+        [ -71.78,  -71.50,  -71.20,  -70.88,  -70.51,  -70.10,  -69.62,  -69.05,  -68.33,  -67.31,  -64.23],  // 30 hPa
+        [ -67.86,  -67.58,  -67.26,  -66.92,  -66.54,  -66.11,  -65.61,  -65.01,  -64.25,  -63.18,  -59.95],  // 50 hPa
+        [ -62.24,  -61.94,  -61.60,  -61.24,  -60.83,  -60.37,  -59.83,  -59.20,  -58.39,  -57.24,  -53.79],  // 100 hPa
+        [ -58.78,  -58.46,  -58.11,  -57.73,  -57.31,  -56.83,  -56.27,  -55.61,  -54.77,  -53.57,  -49.99],  // 150 hPa
+        [ -56.23,  -55.91,  -55.55,  -55.16,  -54.72,  -54.23,  -53.66,  -52.97,  -52.11,  -50.88,  -47.19],  // 200 hPa
+        [ -54.21,  -53.87,  -53.51,  -53.11,  -52.66,  -52.16,  -51.58,  -50.88,  -49.99,  -48.73,  -44.96],  // 250 hPa
+        [ -52.52,  -52.18,  -51.81,  -51.40,  -50.95,  -50.43,  -49.84,  -49.13,  -48.23,  -46.95,  -43.10],  // 300 hPa
+        [ -49.79,  -49.44,  -49.06,  -48.64,  -48.17,  -47.64,  -47.03,  -46.30,  -45.37,  -44.05,  -40.10],  // 400 hPa
+        [ -47.62,  -47.26,  -46.87,  -46.44,  -45.96,  -45.42,  -44.80,  -44.05,  -43.10,  -41.75,  -37.70],  // 500 hPa
+    ] },
+    { cf: 0.0336, table: "A1", label: "Appleman", t: [
+        [ -70.92,  -70.65,  -70.35,  -70.01,  -69.65,  -69.23,  -68.75,  -68.17,  -67.44,  -66.41,  -63.30],  // 30 hPa
+        [ -66.97,  -66.68,  -66.36,  -66.02,  -65.63,  -65.19,  -64.69,  -64.08,  -63.32,  -62.23,  -58.97],  // 50 hPa
+        [ -61.29,  -60.98,  -60.64,  -60.27,  -59.86,  -59.39,  -58.85,  -58.21,  -57.39,  -56.23,  -52.74],  // 100 hPa
+        [ -57.78,  -57.46,  -57.11,  -56.73,  -56.30,  -55.81,  -55.25,  -54.58,  -53.73,  -52.52,  -48.89],  // 150 hPa
+        [ -55.21,  -54.88,  -54.52,  -54.12,  -53.68,  -53.18,  -52.61,  -51.91,  -51.04,  -49.80,  -46.07],  // 200 hPa
+        [ -53.16,  -52.82,  -52.46,  -52.05,  -51.60,  -51.09,  -50.50,  -49.79,  -48.90,  -47.63,  -43.81],  // 250 hPa
+        [ -51.46,  -51.11,  -50.74,  -50.32,  -49.86,  -49.34,  -48.74,  -48.02,  -47.11,  -45.82,  -41.93],  // 300 hPa
+        [ -48.70,  -48.34,  -47.96,  -47.53,  -47.06,  -46.52,  -45.90,  -45.16,  -44.22,  -42.89,  -38.88],  // 400 hPa
+        [ -46.50,  -46.14,  -45.74,  -45.31,  -44.82,  -44.27,  -43.64,  -42.88,  -41.92,  -40.56,  -36.46],  // 500 hPa
+    ] },
+    { cf: 0.0340, table: "A3", label: "low-bypass", t: [
+        [ -70.83,  -70.56,  -70.26,  -69.92,  -69.56,  -69.14,  -68.66,  -68.08,  -67.35,  -66.31,  -63.20],  // 30 hPa
+        [ -66.88,  -66.59,  -66.27,  -65.92,  -65.54,  -65.10,  -64.59,  -63.99,  -63.22,  -62.13,  -58.87],  // 50 hPa
+        [ -61.19,  -60.88,  -60.54,  -60.17,  -59.76,  -59.29,  -58.75,  -58.10,  -57.28,  -56.12,  -52.63],  // 100 hPa
+        [ -57.68,  -57.36,  -57.01,  -56.62,  -56.19,  -55.71,  -55.14,  -54.47,  -53.62,  -52.41,  -48.78],  // 150 hPa
+        [ -55.10,  -54.77,  -54.41,  -54.01,  -53.57,  -53.07,  -52.49,  -51.80,  -50.93,  -49.68,  -45.95],  // 200 hPa
+        [ -53.05,  -52.71,  -52.35,  -51.94,  -51.49,  -50.98,  -50.39,  -49.68,  -48.78,  -47.51,  -43.69],  // 250 hPa
+        [ -51.34,  -51.00,  -50.62,  -50.21,  -49.75,  -49.23,  -48.63,  -47.91,  -47.00,  -45.70,  -41.81],  // 300 hPa
+        [ -48.58,  -48.23,  -47.84,  -47.41,  -46.94,  -46.40,  -45.79,  -45.04,  -44.10,  -42.77,  -38.76],  // 400 hPa
+        [ -46.38,  -46.02,  -45.62,  -45.19,  -44.70,  -44.15,  -43.52,  -42.76,  -41.80,  -40.43,  -36.33],  // 500 hPa
+    ] },
+    { cf: 0.0390, table: "A4", label: "high-bypass", t: [
+        [ -69.79,  -69.51,  -69.20,  -68.87,  -68.50,  -68.07,  -67.58,  -67.00,  -66.26,  -65.21,  -62.06],  // 30 hPa
+        [ -65.78,  -65.49,  -65.17,  -64.81,  -64.42,  -63.98,  -63.47,  -62.85,  -62.08,  -60.98,  -57.67],  // 50 hPa
+        [ -60.02,  -59.70,  -59.36,  -58.98,  -58.57,  -58.09,  -57.55,  -56.89,  -56.06,  -54.88,  -51.35],  // 100 hPa
+        [ -56.46,  -56.13,  -55.78,  -55.39,  -54.95,  -54.46,  -53.89,  -53.21,  -52.35,  -51.12,  -47.44],  // 150 hPa
+        [ -53.85,  -53.51,  -53.15,  -52.74,  -52.30,  -51.79,  -51.20,  -50.50,  -49.62,  -48.35,  -44.57],  // 200 hPa
+        [ -51.77,  -51.43,  -51.05,  -50.64,  -50.18,  -49.67,  -49.07,  -48.35,  -47.44,  -46.15,  -42.28],  // 250 hPa
+        [ -50.04,  -49.69,  -49.31,  -48.89,  -48.42,  -47.89,  -47.28,  -46.55,  -45.63,  -44.31,  -40.36],  // 300 hPa
+        [ -47.23,  -46.87,  -46.48,  -46.05,  -45.57,  -45.03,  -44.40,  -43.65,  -42.69,  -41.34,  -37.27],  // 400 hPa
+        [ -45.00,  -44.63,  -44.23,  -43.79,  -43.30,  -42.74,  -42.10,  -41.33,  -40.35,  -38.97,  -34.80],  // 500 hPa
+    ] }
+  ];
+
+  // ======================================================================
+  // Physics
+  // ======================================================================
+  // Saturation vapour pressure, Tetens formula: esat(T) = a1 exp{a3 (T − T0) / (T − a4)}, T in K, result in Pa.
+  //   over water: Buck (1981)                    a1 = 611.21 Pa, a3 = 17.502, a4 = 32.19 K
+  //   over ice:   AERKi, Alduchov & Eskridge (1996) a1 = 611.21 Pa, a3 = 22.587, a4 = −0.7 K
+  const T0 = 273.16;
+  const tetens = (a1, a3, a4) => Tk => a1 * Math.exp(a3 * (Tk - T0) / (Tk - a4));
+  const esatW = tetens(611.21, 17.502, 32.19);
+  const esatI = tetens(611.21, 22.587, -0.7);
+  // Vapour pressure (Pa) from temperature (°C) and relative humidity over water (%)
+  const vapourPressure = (tC, rhw) => rhw / 100 * esatW(tC + 273.15);
+  // Relative humidity over ice (%) from vapour pressure (Pa) and temperature (°C)
+  const rhIce = (e, tC) => 100 * e / esatI(tC + 273.15);
+
+  // Saturation vapour pressure for the actual cloud phase (Pa), T in K:
+  //   T ≤ Ti = 250.16 K → ice;  T ≥ T0 = 273.16 K → water;
+  //   in between: α(T)·esat,w(T) + (1 − α(T))·esat,i(T), with α(T) = ((T − Ti)/(T0 − Ti))².
+  const T_ICE = 250.16;
+  function esatMixed(Tk) {
+    if (Tk <= T_ICE) return esatI(Tk);
+    if (Tk >= T0) return esatW(Tk);
+    const a = Math.pow((Tk - T_ICE) / (T0 - T_ICE), 2);
+    return a * esatW(Tk) + (1 - a) * esatI(Tk);
+  }
+  // Relative humidity with respect to the cloud phase (%) from vapour pressure (Pa) and temperature (°C)
+  const rhPhase = (e, tC) => 100 * e / esatMixed(tC + 273.15);
+
+  // Cloud cover parameterisation (%): CC = 1 − √((1 − RH) / (1 − RHcrit)), RH as a fraction.
+  // RH ≤ RHcrit → 0 %; RH ≥ 100 % → 100 %.
+  const RH_CRIT = 0.80;
+  function cloudCover(rhPct) {
+    if (Number.isNaN(rhPct)) return NaN;
+    const rh = rhPct / 100;
+    if (rh <= RH_CRIT) return 0;
+    if (rh >= 1) return 100;
+    return 100 * (1 - Math.sqrt((1 - rh) / (1 - RH_CRIT)));
+  }
+
+  // RH interpolation coordinate s = √(1 − RH/100). Near saturation Tc varies
+  // like √(1 − RH) (tangent-point geometry of the Appleman diagram), so
+  // interpolating linearly in s follows the table curvature between 90 and 100 %.
+  const S_NODES = Array.from({ length: 11 }, (_, j) => Math.sqrt(1 - j / 10)); // decreasing
+
+  function tcRow(row, rh) {
+    const s = Math.sqrt(1 - Math.min(100, Math.max(0, rh)) / 100);
+    for (let j = 0; j < 10; j++) {
+      if (s <= S_NODES[j] && s >= S_NODES[j + 1]) {
+        const f = (S_NODES[j] - s) / (S_NODES[j] - S_NODES[j + 1]);
+        return row[j] + f * (row[j + 1] - row[j]);
+      }
+    }
+    return row[10];
+  }
+
+  // Tc (°C) from one table at pressure p (hPa) and RHw (%), linear in ln p.
+  // Pressures outside 30–500 hPa are extrapolated from the two nearest rows.
+  function tcTable(tab, p, rh) {
+    const n = TC_P.length;
+    let k = 0;
+    if (p >= TC_P[n - 1]) k = n - 2;
+    else while (k < n - 2 && p > TC_P[k + 1]) k++;
+    const a = tcRow(tab.t[k], rh), b = tcRow(tab.t[k + 1], rh);
+    const f = (Math.log(p) - Math.log(TC_P[k])) / (Math.log(TC_P[k + 1]) - Math.log(TC_P[k]));
+    return a + f * (b - a);
+  }
+
+  // Tc (°C) for any contrail factor in the table range, linear in ln CF.
+  function criticalTemp(p, rh, cf) {
+    const T = TC_TABLES;
+    if (cf <= T[0].cf) return tcTable(T[0], p, rh);
+    if (cf >= T[T.length - 1].cf) return tcTable(T[T.length - 1], p, rh);
+    let k = 0;
+    while (k < T.length - 2 && cf > T[k + 1].cf) k++;
+    const a = tcTable(T[k], p, rh), b = tcTable(T[k + 1], p, rh);
+    const f = (Math.log(cf) - Math.log(T[k].cf)) / (Math.log(T[k + 1].cf) - Math.log(T[k].cf));
+    return a + f * (b - a);
+  }
+
+  // Persistence criterion: RH over ice ≥ threshold (%), set in the UI
+  const persist = { thr: 90 };
+  // Contrail category: 0 none, 1 forms (short-lived), 2 persistent, -1 no data
+  function category(margin, rhPersist) {
+    if (Number.isNaN(margin)) return -1;
+    if (margin >= 0) return 0;
+    if (Number.isNaN(rhPersist)) return 1;
+    return rhPersist >= persist.thr ? 2 : 1;
+  }
+
+  // Approximate pressure altitude (ICAO standard atmosphere) → flight level
+  function flightLevel(p) {
+    let h;
+    if (p >= 226.32) h = 44330.8 * (1 - Math.pow(p / 1013.25, 0.190263));
+    else h = 11000 + 6341.6 * Math.log(226.32 / p);
+    return h / 0.3048 / 100;
+  }
+
+  // Expose for testing in the browser console
+  window.contrail = { criticalTemp, esatW, esatI, esatMixed, vapourPressure, rhIce, rhPhase, cloudCover, flightLevel };
+
+  // ======================================================================
+  // DOM & state
+  // ======================================================================
+  const $ = id => document.getElementById(id);
+  const canvas = $("plot"), ctx = canvas.getContext("2d");
+  const tip = $("tip"), statusEl = $("status");
+  let data = null;
+
+  // Contrail factor presets
+  const presetSel = $("cfPreset");
+  for (const t of TC_TABLES) {
+    const o = document.createElement("option");
+    o.value = t.cf.toFixed(4);
+    o.textContent = `${t.cf.toFixed(4)} – ${t.label} (Table ${t.table})`;
+    presetSel.appendChild(o);
+  }
+  const optCustom = document.createElement("option");
+  optCustom.value = "custom"; optCustom.textContent = "Custom (interpolated)…";
+  presetSel.appendChild(optCustom);
+
+  // ======================================================================
+  // Helpers
+  // ======================================================================
+  const LN_BOT = Math.log(P_BOT), LN_TOP = Math.log(P_TOP);
+  const lnLevels = LEVELS.map(Math.log);
+  const pad2 = n => String(n).padStart(2, "0");
+  const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const fmtDay = d => `${DOW[d.getUTCDay()]} ${d.getUTCDate()} ${MON[d.getUTCMonth()]}`;
+  const fmtTime = d => `${fmtDay(d)} ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())} UTC`;
+  const greyFor = v => 255 - (255 - GREY_FULL) * Math.max(0, Math.min(100, v)) / 100;
+  const fmtFL = p => `FL${String(Math.max(0, Math.round(flightLevel(p) / 5) * 5)).padStart(3, "0")}`;
+
+  function setStatus(msg, isErr) {
+    statusEl.textContent = msg || "";
+    statusEl.className = isErr ? "error" : "";
+  }
+
+  function currentCF() {
+    const v = parseFloat($("cf").value);
+    const lo = TC_TABLES[0].cf, hi = TC_TABLES[TC_TABLES.length - 1].cf;
+    if (!Number.isFinite(v)) return 0.039;
+    return Math.min(hi, Math.max(lo, v));
+  }
+
+  function syncPresetFromValue() {
+    const v = currentCF().toFixed(4);
+    presetSel.value = TC_TABLES.some(t => t.cf.toFixed(4) === v) ? v : "custom";
+  }
+
+  // Fractional level coordinate (0 = 1000 hPa … LEVELS.length-1 = 150 hPa) for ln p
+  function levelCoord(lnp) {
+    if (lnp >= lnLevels[0]) return 0;
+    const last = lnLevels.length - 1;
+    if (lnp <= lnLevels[last]) return last;
+    for (let k = 0; k < last; k++) {
+      if (lnp <= lnLevels[k] && lnp >= lnLevels[k + 1]) {
+        return k + (lnLevels[k] - lnp) / (lnLevels[k] - lnLevels[k + 1]);
+      }
+    }
+    return last;
+  }
+
+  // Bilinear (or nearest) sample of grid[level][time]
+  function sampleGrid(g, i0, i1, fi, k0, k1, fk, smooth) {
+    if (!smooth) return g[fk < .5 ? k0 : k1][fi < .5 ? i0 : i1];
+    const a = g[k0][i0], b = g[k0][i1], c = g[k1][i0], d = g[k1][i1];
+    if (Number.isNaN(a) || Number.isNaN(b) || Number.isNaN(c) || Number.isNaN(d)) {
+      return g[fk < .5 ? k0 : k1][fi < .5 ? i0 : i1];
+    }
+    return (a * (1 - fi) + b * fi) * (1 - fk) + (c * (1 - fi) + d * fi) * fk;
+  }
+  function bracket(x, nmax) {
+    const i0 = Math.max(0, Math.min(Math.floor(x), nmax)), i1 = Math.min(i0 + 1, nmax);
+    return [i0, i1, x - i0];
+  }
+
+  // ======================================================================
+  // Data loading
+  // ======================================================================
+  function buildUrl(lat, lon, days, past) {
+    const vars = [];
+    for (const name of ["temperature", "relative_humidity"]) {
+      for (const p of LEVELS) vars.push(`${name}_${p}hPa`);
+    }
+    for (const b of CLOUD_BARS) vars.push(b.api);
+    vars.push("surface_pressure");
+    const q = new URLSearchParams({
+      latitude: lat, longitude: lon, hourly: vars.join(","), models: MODEL,
+    });
+    if (past > 0) q.set("past_days", past);
+    q.set("forecast_days", days);
+    return `${API}?${q.toString()}`;
+  }
+
+  async function load() {
+    const lat = parseFloat($("lat").value);
+    const lon = parseFloat($("lon").value);
+    const days = parseInt($("days").value, 10);
+    const past = parseInt($("past").value, 10);
+    if (!(lat >= -90 && lat <= 90)) return setStatus("Latitude must be between −90 and 90.", true);
+    if (!(lon >= -180 && lon <= 180)) return setStatus("Longitude must be between −180 and 180.", true);
+    if (!(days >= 1 && days <= 7)) return setStatus("Forecast days must be between 1 and 7.", true);
+    if (!(past >= 0 && past <= 92)) return setStatus("Past days must be between 0 and 92.", true);
+    updateUrl();
+
+    $("go").disabled = true;
+    setStatus("Loading forecast from Open-Meteo…");
+    try {
+      const res = await fetch(buildUrl(lat, lon, days, past));
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json || json.error) throw new Error((json && json.reason) || `HTTP ${res.status}`);
+      parse(json);
+      computeContrails();
+      setStatus(`Loaded ${data.times.length} hourly steps · model ${MODEL}`);
+      draw();
+    } catch (e) {
+      setStatus(`Could not load data: ${e.message}`, true);
+    } finally {
+      $("go").disabled = false;
+    }
+  }
+
+  function updateUrl() {
+    try {
+      const u = new URL(location.href);
+      u.searchParams.set("lat", $("lat").value);
+      u.searchParams.set("lon", $("lon").value);
+      u.searchParams.set("past", $("past").value);
+      u.searchParams.set("days", $("days").value);
+      u.searchParams.set("cf", currentCF().toFixed(4));
+      history.replaceState(null, "", u);
+    } catch (_) { /* file:// or sandboxed – ignore */ }
+  }
+
+  function parse(json) {
+    const h = json.hourly;
+    if (!h || !Array.isArray(h.time)) throw new Error("Unexpected API response (no hourly data).");
+    const offset = (json.utc_offset_seconds || 0) * 1000;
+    const times = h.time.map(t => new Date(Date.parse(t + "Z") - offset));
+    const field = name => LEVELS.map(p => {
+      const arr = h[`${name}_${p}hPa`] || [];
+      return times.map((_, i) => (arr[i] === null || arr[i] === undefined) ? NaN : +arr[i]);
+    });
+    data = {
+      times,
+      temp: field("temperature"),
+      rhw: field("relative_humidity"),          // ICON relative humidity is over water
+      ...Object.fromEntries(CLOUD_BARS.map(b => [b.key,
+        times.map((_, i) => { const v = (h[b.api] || [])[i]; return (v === null || v === undefined) ? NaN : +v; })])),
+      psfc: times.map((_, i) => { const v = (h.surface_pressure || [])[i]; return (v === null || v === undefined) ? NaN : +v; }),
+      meta: { lat: json.latitude, lon: json.longitude, elev: json.elevation },
+    };
+    // model levels below the ground (p > surface pressure); unknown surface pressure → treated as above ground
+    data.below = LEVELS.map(p => data.psfc.map(ps => p > ps));
+    // vapour pressure (Pa) and relative humidity over ice (%)
+    data.e = data.temp.map((row, k) => row.map((t, i) => vapourPressure(t, data.rhw[k][i])));
+    data.rhi = data.temp.map((row, k) => row.map((t, i) => rhIce(data.e[k][i], t)));
+    // RH with respect to the cloud phase (%) and parameterised cloud cover (%)
+    data.rhp = data.temp.map((row, k) => row.map((t, i) => rhPhase(data.e[k][i], t)));
+    data.cloud = data.rhp.map(row => row.map(cloudCover));
+  }
+
+  // Everything that depends on the contrail factor
+  function computeContrails() {
+    if (!data) return;
+    const cf = currentCF();
+    data.cf = cf;
+    data.tc = LEVELS.map((p, k) => data.rhw[k].map(rh => Number.isNaN(rh) ? NaN : criticalTemp(p, rh, cf)));
+    data.margin = data.temp.map((row, k) => row.map((t, i) => t - data.tc[k][i]));   // T − Tc (K)
+    data.persistField = data.rhi;
+    data.cat = data.margin.map((row, k) => row.map((m, i) =>
+      data.below[k][i] ? -1 : category(m, data.persistField[k][i])));
+    // per-hour summary over the table range (p ≤ 500 hPa); below-ground levels are already -1
+    data.strip = data.times.map((_, i) =>
+      LEVELS.reduce((c, p, k) => p <= STRIP_P_MAX ? Math.max(c, data.cat[k][i]) : c, -1));
+    updateTitle();
+  }
+
+  function updateTitle() {
+    const fmt = (v, pos, neg) => `${Math.abs(v).toFixed(2)}° ${v >= 0 ? pos : neg}`;
+    const n = data.times.length;
+    $("title").innerHTML =
+      `Grid point ${fmt(data.meta.lat, "N", "S")}, ${fmt(data.meta.lon, "E", "W")}` +
+      (Number.isFinite(data.meta.elev) ? ` <small>· elevation ${Math.round(data.meta.elev)} m</small>` : "") +
+      ` <small>· DWD ICON global · ${fmtDay(data.times[0])} – ${fmtDay(data.times[n - 1])}` +
+      ($("showContrails").checked ? ` · contrail factor ${data.cf.toFixed(4)} g kg⁻¹ K⁻¹` : "") + `</small>`;
+  }
+
+  // ======================================================================
+  // Drawing
+  // ======================================================================
+  let hatch = null;
+  function hatchPattern() {
+    if (hatch) return hatch;
+    const c = document.createElement("canvas"); c.width = c.height = 8;
+    const x = c.getContext("2d");
+    x.fillStyle = "#fff"; x.fillRect(0, 0, 8, 8);
+    x.strokeStyle = "#f2c4c4"; x.lineWidth = 2;
+    x.beginPath(); x.moveTo(0, 8); x.lineTo(8, 0); x.moveTo(-2, 2); x.lineTo(2, -2); x.moveTo(6, 10); x.lineTo(10, 6); x.stroke();
+    return (hatch = ctx.createPattern(c, "repeat"));
+  }
+
+  function geometry() {
+    const W = canvas.clientWidth, H = canvas.clientHeight;
+    return { W, H, x0: M.l, y0: M.t, w: W - M.l - M.r, h: H - M.t - M.b };
+  }
+  // 1000 hPa at the bottom edge, 150 hPa at the top edge, linear in ln p
+  const yOfP = (p, g) => g.y0 + g.h * (Math.log(p) - LN_TOP) / (LN_BOT - LN_TOP);
+
+  // Below-ground test for a point: in "blocks" mode a level cell is ground if that model level is below the
+  // surface; in "smooth" mode the point's pressure is compared with the time-interpolated surface pressure.
+  function isBelowGround(p, i0, i1, fi, k0, k1, fk, smooth) {
+    if (!smooth) return data.below[fk < .5 ? k0 : k1][fi < .5 ? i0 : i1];
+    const a = data.psfc[i0], b = data.psfc[i1];
+    const ps = Number.isNaN(a) ? b : Number.isNaN(b) ? a : a + fi * (b - a);
+    return p > ps;
+  }
+
+  function renderField(g, dpr) {
+    const n = data.times.length, nk = LEVELS.length;
+    const smooth = $("mode").value === "smooth";
+    const show = $("showContrails").checked;
+    const pw = Math.max(1, Math.round(g.w * dpr)), ph = Math.max(1, Math.round(g.h * dpr));
+    const off = document.createElement("canvas"); off.width = pw; off.height = ph;
+    const octx = off.getContext("2d");
+    const img = octx.createImageData(pw, ph), px = img.data;
+    const cats = new Int8Array(pw * ph);
+
+    // per-row level bracket and pressure
+    const rk0 = new Int16Array(ph), rk1 = new Int16Array(ph), rfk = new Float64Array(ph), rp = new Float64Array(ph);
+    for (let r = 0; r < ph; r++) {
+      const lnp = LN_TOP + (LN_BOT - LN_TOP) * (r + 0.5) / ph;
+      rp[r] = Math.exp(lnp);
+      [rk0[r], rk1[r], rfk[r]] = bracket(levelCoord(lnp), nk - 1);
+    }
+    for (let c = 0; c < pw; c++) {
+      const [i0, i1, fi] = bracket((n - 1) * (c + 0.5) / pw, n - 1);
+      for (let r = 0; r < ph; r++) {
+        const k0 = rk0[r], k1 = rk1[r], fk = rfk[r];
+        const idx = r * pw + c, o = idx * 4;
+        if (isBelowGround(rp[r], i0, i1, fi, k0, k1, fk, smooth)) {
+          cats[idx] = -1;
+          px[o] = GROUND[0]; px[o + 1] = GROUND[1]; px[o + 2] = GROUND[2]; px[o + 3] = 255;
+          continue;
+        }
+        const v = sampleGrid(data.cloud, i0, i1, fi, k0, k1, fk, smooth);
+        let cat = -1;
+        if (show) {
+          const m = sampleGrid(data.margin, i0, i1, fi, k0, k1, fk, smooth);
+          const rh = sampleGrid(data.persistField, i0, i1, fi, k0, k1, fk, smooth);
+          cat = category(m, rh);
+        }
+        cats[idx] = cat;
+        if (Number.isNaN(v)) {
+          // no cloud data: leave transparent (hatched background) unless contrail overlay applies
+          if (cat > 0) { const f = CAT[cat].fill; px[o] = f[0]; px[o+1] = f[1]; px[o+2] = f[2]; px[o+3] = Math.round(f[3] * 255); }
+          continue;
+        }
+        let R = greyFor(v), G = R, B = R;
+        if (cat > 0) {
+          const f = CAT[cat].fill, a = f[3];
+          R = R * (1 - a) + f[0] * a; G = G * (1 - a) + f[1] * a; B = B * (1 - a) + f[2] * a;
+        }
+        px[o] = R; px[o + 1] = G; px[o + 2] = B; px[o + 3] = 255;
+      }
+    }
+
+    // outlines: pixels of a contrail region whose neighbour (≈1 CSS px away) has a lower category
+    if (show) {
+      const d = Math.max(1, Math.round(dpr));
+      for (let r = 0; r < ph; r++) {
+        for (let c = 0; c < pw; c++) {
+          const idx = r * pw + c, cat = cats[idx];
+          if (cat <= 0) continue;
+          let edge = false;
+          for (let s = 1; s <= d && !edge; s++) {
+            if ((c - s >= 0 && cats[idx - s] < cat) || (c + s < pw && cats[idx + s] < cat) ||
+                (r - s >= 0 && cats[idx - s * pw] < cat) || (r + s < ph && cats[idx + s * pw] < cat)) edge = true;
+          }
+          if (edge) {
+            const l = CAT[cat].line, o = idx * 4;
+            px[o] = l[0]; px[o + 1] = l[1]; px[o + 2] = l[2]; px[o + 3] = 255;
+          }
+        }
+      }
+    }
+    octx.putImageData(img, 0, 0);
+    return off;
+  }
+
+  function draw() {
+    const dpr = window.devicePixelRatio || 1;
+    const g = geometry();
+    canvas.width = Math.round(g.W * dpr); canvas.height = Math.round(g.H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, g.W, g.H);
+    $("card").classList.toggle("off", !$("showContrails").checked);
+    if (!data || g.w <= 0 || g.h <= 0) return;
+
+    const n = data.times.length;
+    const t0 = data.times[0].getTime(), t1 = data.times[n - 1].getTime();
+    const xOfT = t => g.x0 + g.w * (t - t0) / (t1 - t0 || 1);
+    const show = $("showContrails").checked;
+    ctx.font = "12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+    ctx.lineWidth = 1;
+
+    // ---- field ----
+    ctx.fillStyle = hatchPattern();
+    ctx.fillRect(g.x0, g.y0, g.w, g.h);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(renderField(g, dpr), g.x0, g.y0, g.w, g.h);
+
+    // ---- contrail summary strip ----
+    if (show) {
+      const step = g.w / Math.max(1, n - 1);
+      for (let i = 0; i < n; i++) {
+        const c = data.strip[i];
+        const xa = Math.max(g.x0, xOfT(data.times[i].getTime()) - step / 2);
+        const xb = Math.min(g.x0 + g.w, xOfT(data.times[i].getTime()) + step / 2);
+        ctx.fillStyle = c < 0 ? hatchPattern() : CAT[c].css;
+        ctx.fillRect(xa, STRIP.y, xb - xa + 0.5, STRIP.h);
+      }
+      ctx.strokeStyle = "#8c959f";
+      ctx.strokeRect(g.x0 + 0.5, STRIP.y + 0.5, g.w - 1, STRIP.h - 1);
+      ctx.fillStyle = "#1f2328"; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+      ctx.fillText("Contrails", g.x0 - 8, STRIP.y + STRIP.h / 2);
+      ctx.fillStyle = "#656d76"; ctx.textAlign = "left";
+      ctx.font = "11px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+      ctx.fillText("≤ 500 hPa", g.x0 + g.w + 6, STRIP.y + STRIP.h / 2);
+      ctx.font = "12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+    }
+
+    // ---- mid / low cloud cover summary bars (same grey shading as the cross-section) ----
+    {
+      const step = g.w / Math.max(1, n - 1);
+      for (const b of CLOUD_BARS) {
+        for (let i = 0; i < n; i++) {
+          const v = data[b.key][i];
+          const xc = xOfT(data.times[i].getTime());
+          const xa = Math.max(g.x0, xc - step / 2), xb = Math.min(g.x0 + g.w, xc + step / 2);
+          if (Number.isNaN(v)) ctx.fillStyle = hatchPattern();
+          else { const gv = Math.round(greyFor(v)); ctx.fillStyle = `rgb(${gv},${gv},${gv})`; }
+          ctx.fillRect(xa, b.y, xb - xa + 0.5, b.h);
+        }
+        ctx.strokeStyle = "#8c959f";
+        ctx.strokeRect(g.x0 + 0.5, b.y + 0.5, g.w - 1, b.h - 1);
+        ctx.fillStyle = "#1f2328"; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+        ctx.fillText(b.label, g.x0 - 8, b.y + b.h / 2);
+      }
+    }
+
+    // ---- pressure grid, left labels (hPa) and right labels (flight level) ----
+    // labels: placed in priority order, skipping any that would overlap one already placed
+    const LABEL_PRIORITY = [1000, 850, 700, 500, 300, 200, 150, 250, 400, 600, 925, 800, 900, 950, 975];
+    const labelled = new Set(), placedY = [];
+    for (const p of [...LABEL_PRIORITY.filter(q => LEVELS.includes(q)), ...LEVELS.filter(q => !LABEL_PRIORITY.includes(q))]) {
+      const y = yOfP(p, g);
+      if (placedY.every(py => Math.abs(py - y) >= 14)) { labelled.add(p); placedY.push(y); }
+    }
+    for (const p of LEVELS) {
+      const y = Math.round(yOfP(p, g)) + 0.5;
+      ctx.strokeStyle = "rgba(9,105,218,0.18)";
+      ctx.setLineDash([3, 4]);
+      ctx.beginPath(); ctx.moveTo(g.x0, y); ctx.lineTo(g.x0 + g.w, y); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.strokeStyle = "#57606a";
+      ctx.beginPath(); ctx.moveTo(g.x0 - 5, y); ctx.lineTo(g.x0, y); ctx.moveTo(g.x0 + g.w, y); ctx.lineTo(g.x0 + g.w + 4, y); ctx.stroke();
+      if (!labelled.has(p)) continue;
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#1f2328"; ctx.textAlign = "right";
+      ctx.fillText(String(p), g.x0 - 8, y);
+      ctx.fillStyle = "#656d76"; ctx.textAlign = "left";
+      ctx.fillText(fmtFL(p), g.x0 + g.w + 7, y);
+    }
+
+    // ---- time axis ----
+    const pxPerHour = g.w / ((t1 - t0) / 3.6e6 || 1);
+    const minorStep = pxPerHour * 6 >= 22 ? 6 : pxPerHour * 12 >= 22 ? 12 : 24;
+    const showHourLabels = pxPerHour * minorStep >= 34 && minorStep < 24;
+    const first = new Date(t0); first.setUTCMinutes(0, 0, 0);
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    for (let t = first.getTime(); t <= t1; t += 3.6e6) {
+      const d = new Date(t), hr = d.getUTCHours();
+      if (t < t0 || hr % minorStep) continue;
+      const x = Math.round(xOfT(t)) + 0.5;
+      const isDay = hr === 0;
+      ctx.strokeStyle = isDay ? "rgba(31,35,40,0.45)" : "rgba(9,105,218,0.14)";
+      ctx.beginPath(); ctx.moveTo(x, g.y0); ctx.lineTo(x, g.y0 + g.h); ctx.stroke();
+      if (isDay) {   // day separators continue through the summary bars
+        ctx.strokeStyle = "rgba(31,35,40,0.35)";
+        ctx.beginPath();
+        if (show) { ctx.moveTo(x, STRIP.y); ctx.lineTo(x, STRIP.y + STRIP.h); }
+        for (const b of CLOUD_BARS) { ctx.moveTo(x, b.y); ctx.lineTo(x, b.y + b.h); }
+        ctx.stroke();
+      }
+      ctx.strokeStyle = "#57606a";
+      ctx.beginPath(); ctx.moveTo(x, g.y0 + g.h); ctx.lineTo(x, g.y0 + g.h + (isDay ? 7 : 4)); ctx.stroke();
+      if (showHourLabels && !isDay) {
+        ctx.fillStyle = "#656d76";
+        ctx.fillText(pad2(hr), x, g.y0 + g.h + 6);
+      }
+    }
+    ctx.fillStyle = "#1f2328";
+    const dayStart = new Date(t0); dayStart.setUTCHours(0, 0, 0, 0);
+    for (let t = dayStart.getTime(); t <= t1; t += 864e5) {
+      const a = Math.max(t, t0), b = Math.min(t + 864e5, t1);
+      if (b - a < 3 * 3.6e6) continue;
+      const label = fmtDay(new Date(t));
+      if (xOfT(b) - xOfT(a) < ctx.measureText(label).width + 6) continue;
+      ctx.fillText(label, (xOfT(a) + xOfT(b)) / 2, g.y0 + g.h + (showHourLabels ? 22 : 10));
+    }
+
+    // ---- "now" marker ----
+    const now = Date.now();
+    if (now >= t0 && now <= t1) {
+      const x = Math.round(xOfT(now)) + 0.5;
+      ctx.strokeStyle = "#cf222e"; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(x, show ? STRIP.y : CLOUD_BARS[0].y); ctx.lineTo(x, g.y0 + g.h); ctx.stroke();
+      ctx.lineWidth = 1;
+      ctx.fillStyle = "#cf222e"; ctx.textBaseline = "top"; ctx.textAlign = "left";
+      ctx.fillText("now", x + 3, g.y0 + 3);
+      // when past days are shown, mark which side of "now" is model history and which is forecast
+      if (now - t0 > 12 * 3.6e6) {
+        ctx.fillStyle = "#656d76"; ctx.textBaseline = "bottom";
+        ctx.textAlign = "right"; ctx.fillText("◂ past", x - 4, g.y0 + g.h - 3);
+        ctx.textAlign = "left"; ctx.fillText("forecast ▸", x + 4, g.y0 + g.h - 3);
+      }
+    }
+
+    // ---- frame & axis titles ----
+    ctx.strokeStyle = "#57606a";
+    ctx.strokeRect(g.x0 + 0.5, g.y0 + 0.5, g.w - 1, g.h - 1);
+    ctx.fillStyle = "#656d76"; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+    ctx.fillText("Time (UTC)", g.x0 + g.w / 2, g.H - 2);
+    ctx.save();
+    ctx.translate(14, g.y0 + g.h / 2); ctx.rotate(-Math.PI / 2);
+    ctx.textBaseline = "middle";
+    ctx.fillText("Pressure (hPa, log scale)", 0, 0);
+    ctx.restore();
+    ctx.save();
+    ctx.translate(g.W - 8, g.y0 + g.h / 2); ctx.rotate(Math.PI / 2);
+    ctx.textBaseline = "middle";
+    ctx.fillText("Flight level (standard atmosphere)", 0, 0);
+    ctx.restore();
+  }
+
+  // ======================================================================
+  // Tooltip
+  // ======================================================================
+  const f1 = v => Number.isNaN(v) ? "–" : (v < 0 ? "−" : "") + Math.abs(v).toFixed(1);
+  const pct = v => Number.isNaN(v) ? "–" : `${Math.round(v)} %`;
+
+  function verdictHtml(cat, extra = "") {
+    if (cat < 0) return `<div class="verdict">No data${extra}</div>`;
+    return `<div class="verdict"><span class="chip" style="background:${CAT[cat].css}"></span><span>${CAT[cat].text}${extra}</span></div>`;
+  }
+
+  canvas.addEventListener("mousemove", ev => {
+    if (!data) return;
+    const g = geometry();
+    const rect = canvas.getBoundingClientRect();
+    const mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
+    const n = data.times.length;
+    const show = $("showContrails").checked;
+    const inX = mx >= g.x0 && mx <= g.x0 + g.w;
+    const inStrip = show && inX && my >= STRIP.y && my <= STRIP.y + STRIP.h;
+    const inPlot = inX && my >= g.y0 && my <= g.y0 + g.h;
+    const inBar = inX ? CLOUD_BARS.find(b => my >= b.y && my <= b.y + b.h) : undefined;
+    if (!inStrip && !inPlot && !inBar) { tip.style.display = "none"; return; }
+
+    const ti = (n - 1) * (mx - g.x0) / g.w, ni = Math.round(ti);
+    let html;
+    if (inBar) {
+      html = `<b>${fmtTime(data.times[ni])}</b><br>${inBar.label} cover: ${pct(data[inBar.key][ni])}`;
+    } else if (inStrip) {
+      const lv = LEVELS.map((p, k) => ({ p, c: data.cat[k][ni] })).filter(o => o.p <= STRIP_P_MAX);
+      const form = lv.filter(o => o.c >= 1).map(o => o.p), pers = lv.filter(o => o.c === 2).map(o => o.p);
+      html = `<b>${fmtTime(data.times[ni])}</b>` + verdictHtml(data.strip[ni]) +
+        `<div class="row">Contrails form at: ${form.length ? form.join(", ") + " hPa" : "none"}</div>` +
+        `<div class="row">Persistent at: ${pers.length ? pers.join(", ") + " hPa" : "none"}</div>`;
+    } else {
+      const lnp = LN_TOP + (LN_BOT - LN_TOP) * (my - g.y0) / g.h;
+      const p = Math.exp(lnp), lk = levelCoord(lnp), nk = Math.round(lk);
+      const [i0, i1, fi] = bracket(ti, n - 1), [k0, k1, fk] = bracket(lk, LEVELS.length - 1);
+      const smooth = $("mode").value === "smooth";
+      const cloud = sampleGrid(data.cloud, i0, i1, fi, k0, k1, fk, smooth);
+      const psNow = data.psfc[ni];
+      if (isBelowGround(p, i0, i1, fi, k0, k1, fk, smooth)) {
+        html = `<b>${fmtTime(data.times[ni])}</b><br>p ≈ ${Math.round(p)} hPa · below ground` +
+          (Number.isNaN(psNow) ? "" : `<br><span style="opacity:.8">model surface pressure ${Math.round(psNow)} hPa</span>`);
+      } else
+      html = `<b>${fmtTime(data.times[ni])}</b><br>` +
+        `p ≈ ${Math.round(p)} hPa (≈ ${fmtFL(p)}) · cloud cover ${pct(cloud)}`;
+      if (show && !isBelowGround(p, i0, i1, fi, k0, k1, fk, smooth)) {
+        const P = LEVELS[nk];
+        const T = data.temp[nk][ni], rhw = data.rhw[nk][ni], e = data.e[nk][ni], rhi = data.rhi[nk][ni];
+        const tc = data.tc[nk][ni], m = data.margin[nk][ni];
+        const mHere = sampleGrid(data.margin, i0, i1, fi, k0, k1, fk, smooth);
+        const cat = category(mHere, sampleGrid(data.persistField, i0, i1, fi, k0, k1, fk, smooth));
+        html += verdictHtml(cat, smooth && !Number.isNaN(mHere) ? ` <span style="font-weight:400;opacity:.8">(T − T<sub>c</sub> ≈ ${f1(mHere)} K here)</span>` : "") +
+          `<div class="row" style="margin-top:4px;border-top:1px solid rgba(255,255,255,.2);padding-top:4px">` +
+          `Model level ${P} hPa${P > 500 ? " <i>(T<sub>c</sub> extrapolated)</i>" : ""}` +
+          `${data.below[nk][ni] ? " <i>(below ground)</i>" : ""}:</div>` +
+          `<div class="row">T ${f1(T)} °C · RH<sub>w</sub> ${pct(rhw)} (model)</div>` +
+          `<div class="row">e ${Number.isNaN(e) ? "–" : (e / 100).toPrecision(3)} hPa · RH<sub>i</sub> ${pct(rhi)}</div>` +
+          `<div class="row">RH (cloud phase) ${pct(data.rhp[nk][ni])} → cloud cover ${pct(data.cloud[nk][ni])}</div>` +
+          `<div class="row">T<sub>c</sub> ${f1(tc)} °C → T − T<sub>c</sub> = ${f1(m)} K ` +
+          `${Number.isNaN(m) ? "" : m < 0 ? "(cold enough)" : "(too warm)"}</div>` +
+          verdictHtml(data.cat[nk][ni], ` <span style="font-weight:400;opacity:.8">at ${P} hPa</span>`);
+      } else if (!show && !isBelowGround(p, i0, i1, fi, k0, k1, fk, smooth) && !Number.isNaN(data.cloud[nk][ni])) {
+        html += `<br><span style="opacity:.75">${LEVELS[nk]} hPa level: cloud cover ${pct(data.cloud[nk][ni])} · RH (cloud phase) ${pct(data.rhp[nk][ni])}</span>`;
+      }
+    }
+    tip.innerHTML = html;
+    tip.style.display = "block";
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    let tx = mx + 14, ty = my + 14;
+    if (tx + tw > g.W) tx = mx - tw - 14;
+    if (ty + th > g.H) ty = my - th - 14;
+    tip.style.left = Math.max(0, tx) + "px"; tip.style.top = Math.max(0, ty) + "px";
+  });
+  canvas.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+
+  // ======================================================================
+  // Wiring
+  // ======================================================================
+  function onCFChange() {
+    syncPresetFromValue();
+    if (data) { computeContrails(); draw(); }
+    updateUrl();
+  }
+  function onPersistChange() {
+    let thr = parseFloat($("persistThr").value);
+    if (!Number.isFinite(thr)) thr = 90;
+    persist.thr = Math.min(150, Math.max(50, thr));
+    $("persistThr").value = persist.thr;
+    $("persistLabel").textContent = `RHi ≥ ${persist.thr} %`;
+    if (data) { computeContrails(); draw(); }
+  }
+  $("persistThr").addEventListener("change", onPersistChange);
+  $("form").addEventListener("submit", ev => { ev.preventDefault(); load(); });
+  $("mode").addEventListener("change", draw);
+  $("showContrails").addEventListener("change", () => { if (data) updateTitle(); draw(); });
+  presetSel.addEventListener("change", () => {
+    if (presetSel.value !== "custom") { $("cf").value = presetSel.value; onCFChange(); }
+    else $("cf").focus();
+  });
+  $("cf").addEventListener("change", () => {
+    $("cf").value = currentCF().toFixed(4);   // clamp to table range
+    onCFChange();
+  });
+  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(draw, 80); });
+
+  // allow ?lat=..&lon=..&days=..&cf=.. in the URL
+  try {
+    const q = new URLSearchParams(location.search);
+    if (q.has("lat")) $("lat").value = q.get("lat");
+    if (q.has("lon")) $("lon").value = q.get("lon");
+    if (q.has("past")) $("past").value = q.get("past");
+    if (q.has("days")) $("days").value = q.get("days");
+    if (q.has("cf")) $("cf").value = q.get("cf");
+  } catch (_) {}
+  $("cf").value = currentCF().toFixed(4);
+  syncPresetFromValue();
+
+  load();
+})();
+</script>
+</body>
+</html>
